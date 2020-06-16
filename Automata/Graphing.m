@@ -17,6 +17,15 @@ Package["Automata`"]
 PackageScope["automatonGraph"]
 PackageScope["makeThumbnail"]
 
+(*
+(* ::Section:: *)
+(* Clear Symbols *)
+ClearAll[ automatonGraph, makeThumbnail, recomputeThumbnail, squareRange, doubleCircle, automatonEdgeLabel, toEdges,
+  quickGraph, graphRegexArray
+];
+*)
+
+
 automatonGraph::usage = "automatonGraph[A] returns a graph representation of the automaton A.";
 Options[automatonGraph] = {"EdgeTagWrapper" -> Identity};
 automatonGraph[A_, opts : OptionsPattern[{Graph, automatonGraph}]] :=
@@ -118,7 +127,6 @@ toEdges[NFAState[id_, d_, ___]] := Catenate[KeyValueMap[
   DirectedEdge[id, ##] &,
   Merge[Catenate[Thread[Reverse@#, List, 1] & /@ Normal@#], Identity]] &
     /@ Through[{KeyDrop, KeyTake}[d, EmptyString]]];
-
 
 quickGraph[nfa_NFA, opts : OptionsPattern[Graph]] :=
     With[{n = StateCount[nfa]},

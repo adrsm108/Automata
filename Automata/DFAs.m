@@ -20,9 +20,19 @@ PackageExport["DFA"]
 PackageExport["RandomDFA"]
 PackageExport["FactorDFA"]
 PackageExport["ToDFA"]
+PackageExport["MinimizeDFA"]
 
 PackageScope["dfaAscQ"]
 PackageScope["productDFA"]
+PackageScope["scanProductDFA"]
+
+(*
+(* ::Section:: *)
+(* Clear Symbols *)
+ClearAll[ DFAState, DFAQ, DFA, RandomDFA, FactorDFA, ToDFA, MinimizeDFA, dfaAscQ, productDFA, scanProductDFA,
+  validDFAInputQ, validDFAInitQ, productStates
+];
+*)
 
 (* ::Section:: *)
 (* Exported Functions *)
@@ -34,10 +44,9 @@ DFAState[q, ...][a] gives the transition \[Delta](q, a)";
 DFAState::invtr = "Transition `1` is not defined for state `2`.";
 DFAState[id_, d_Association, ___][a_] :=
     Lookup[d, Key[a], (Message[DFAState::invtr, a, id]; Undefined)];
-DFAState /:
-    MakeBoxes[s : DFAState[_, _?AssociationQ, ___],
-      form : (StandardForm | TraditionalForm)] :=
-    makeStateSummaryBoxes[s, form]
+DFAState /: MakeBoxes[s : DFAState[_, _?AssociationQ, ___],
+  form : (StandardForm | TraditionalForm)] :=
+    makeStateSummaryBoxes[s, form];
 DFAState /: Keys[DFAState[_, d_, ___]] := Keys[d];
 DFAState /: Values[DFAState[_, d_, ___]] := Values[d];
 
@@ -70,13 +79,13 @@ DFA[OrderlessPatternSequence[
       "states" -> states,
       "initial" -> initial,
       "terminal" -> terminal,
-      "alphabet" -> alt[alphabet, Union @@ (Keys /@ states)]
+      "alphabet" -> autoAlt[alphabet, Union @@ (Keys /@ states)]
     }];
 
 DFA[states : {(_ -> {___Rule}) ..}, initial_?validDFAInitQ,
   terminal_List, alphabet_List : Automatic] :=
     Module[{tostate, stateIDs = states[[All, 1]],
-      alph = alt[alphabet, Union @@ (Keys@Values@states)]},
+      alph = autoAlt[alphabet, Union @@ (Keys@Values@states)]},
       tostate[id_ -> tf_] := With[{symbols = tf[[All, 1]]},
         Scan[If[! MemberQ[symbols, #], Message[DFA::missingtr, id, #]] &,
           alph];
@@ -117,8 +126,8 @@ DFA /: Graph3D[dfa_DFA?DFAQ, opts : OptionsPattern[{Graph3D, Graph, automatonGra
     Annotate[
       Graph3D[automatonGraph[dfa, filterOpts[{opts}, {Graph, automatonGraph}, Graph3D]],
         filterOpts[{opts}, Graph3D],
-        Lighting -> "Neutral",
-        EdgeShapeFunction -> "Arrow"],
+        (*        Lighting -> "Neutral",*)
+        EdgeShapeFunction -> GraphElementData[{"Arrow", "ArrowSize" -> 0.015}]],
       "Automaton" -> dfa];
 DFA /: ToRules[dfa_DFA?DFAQ] :=
     Normal[Normal@*Transitions /@ States@dfa];
@@ -174,12 +183,12 @@ ToDFA[dfa_?DFAQ, OptionsPattern[]] := Switch[
   "Minimal", MinimizeDFA[dfa]];
 ToDFA[nfa_?NFAQ, alphabet_List : Automatic, OptionsPattern[]] :=
     With[{init = EpsilonClosure[nfa],
-      alph = alt[alphabet, DeleteCases[Alphabet[nfa], EmptyString]],
+      alph = autoAlt[alphabet, DeleteCases[Alphabet[nfa], EmptyString]],
       method = validatedMethod[OptionValue[Method], {Automatic, "Subset", "Indexed", "Minimal"}, ToDFA]},
       Module[{states = States[nfa], i = 1, initfn = MatchQ[init], termfn, namefn, convert},
         termfn = sowPredicate[ContainsAny[IDs[nfa, "Terminal"]] -> convert, "terminal"];
         namefn = Switch[method, Automatic | "Indexed" | "Minimal", (i++) &, "Subset", Identity];
-        convert[subset_] := With[ {name = (convert[subset] = namefn@subset)},
+        convert[subset_] := With[{name = (convert[subset] = namefn@subset)},
           Sow[name -> DFAState[name,
             AssociationMap[
               convert@EpsilonClosure[
@@ -234,6 +243,34 @@ productDFA[automata__, init_, termpred_] :=
         "terminal" -> First[terms, {}],
         "alphabet" -> Alphabet /@ Unevaluated[Intersection[automata]]]];
 
+scanProductDFA::usage = "scanProductDFA[f, A1, A2] applies f to the id of each reachable state in product DFA of A1 and A2, without explicitly constructing it.";
+scanProductDFA[f_, dfa1_?DFAQ, dfa2_?DFAQ] := With[
+  {queue = CreateDataStructure[
+    "Queue", {Catenate@IDs[{dfa1, dfa2}, "Initial"]}],
+    statesAscs = States[{dfa1, dfa2}],
+    alph = If[! SameAlphabetQ[dfa1, dfa2], Return[False], Alphabet[dfa1]]},
+  Module[{enqueue},
+    enqueue[tuple_] := (queue["Push", tuple]; enqueue[tuple] = Null);
+    While[! queue["EmptyQ"],
+      With[{tup = MapThread[Construct,
+        {statesAscs, aside[f, queue["Pop"]]}]},
+        Scan[enqueue[Transitions[tup, #]] &, alph]]]]
+];
+scanProductDFA[f_, nfa1_?NFAQ, nfa2_?NFAQ] := With[
+  {queue = CreateDataStructure["Queue", {EpsilonClosure /@ {nfa1, nfa2}}],
+    statesAscs = States[{nfa1, nfa2}],
+    alph = DeleteCases[Alphabet /@ Unevaluated@Union[nfa1, nfa2], EmptyString]},
+  Module[{enqueue},
+    enqueue[tuple_] := (queue["Push", tuple]; enqueue[tuple] = Null);
+    While[! queue["EmptyQ"],
+      With[{tup = MapThread[Lookup, {statesAscs, aside[f, queue["Pop"]]}]},
+        Scan[enqueue[MapThread[EpsilonClosure,
+          {OperatorApplied[Lookup, {3, 1, 2}][#, {}]
+              /@ (mergeTransitions /@ tup), statesAscs}]] &,
+          alph]]]]
+];
+scanProductDFA[f_, A1_?AutomatonQ, A2_?AutomatonQ] := scanProductDFA[f, NFA[A1], NFA[A2]];
+
 (* ::Section:: *)
 (* Private Functions *)
 
@@ -265,7 +302,7 @@ productStates[dfas : Repeated[_?DFAQ, {2, Infinity}], terminalPredicate_] :=
 productStates[nfas : Repeated[_?NFAQ, {2, Infinity}], terminalPredicate_] :=
     With[{queue = CreateDataStructure["Queue", {EpsilonClosure /@ {nfas}}],
       statesAscs = States[{nfas}],
-      alph = DeleteCases[Alphabet /@ Unevaluated@Intersection[nfas], EmptyString],
+      alph = DeleteCases[Alphabet /@ Unevaluated@Union[nfas], EmptyString],
       statesTag = CreateUUID["NewStates"]},
       Module[{next, tup, enqueue},
         enqueue[tuple_] := (queue["Push", tuple]; enqueue[tuple] = tuple);

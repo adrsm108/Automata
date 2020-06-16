@@ -12,8 +12,9 @@
 (* :Keywords: *)
 (* :Discussion: *)
 
-
 Package["Automata`"]
+
+PackageImport["Developer`"]
 
 PackageExport["StateQ"]
 PackageExport["TerminalQ"]
@@ -24,6 +25,9 @@ PackageExport["SameAlphabetQ"]
 PackageExport["EmptyAutomatonQ"]
 PackageExport["EntireAutomatonQ"]
 PackageExport["EquivalentAutomataQ"]
+PackageExport["SubsetAutomatonQ"]
+PackageExport["EquivalentLanguageQ"]
+PackageExport["SubsetLanguageQ"]
 
 PackageExport["PureAutomaton"]
 PackageExport["AutomatonType"]
@@ -53,6 +57,16 @@ PackageExport["AutomatonSymmetricDifference"]
 PackageExport["AutomatonConcatenation"]
 PackageExport["AutomatonClosure"]
 
+(*
+(* ::Section:: *)
+(* Clear Symbols *)
+ClearAll[StateQ, TerminalQ, InitialQ, AutomatonQ, AutomatonGraphQ, PureAutomatonQ, SameAlphabetQ, EmptyAutomatonQ,
+  EntireAutomatonQ, EquivalentAutomataQ, SubsetAutomatonQ, EquivalentLanguageQ, SubsetLanguageQ, PureAutomaton,
+  AutomatonType, Transitions, StateID, States, IDs, StateCount, AddTransitions, SetInitial, SetTerminal, RenameStates,
+  DeleteUnreachableStates, IndexAutomaton, ReindexAutomaton, TransitiveClosure, EpsilonClosure, AutomatonReversal,
+  AutomatonUnion, AutomatonSymmetricDifference, AutomatonClosure, productStateTerminalPairNoneTrue
+];
+*)
 
 (* ::Section:: *)
 (* Predicates *)
@@ -106,49 +120,38 @@ EntireAutomatonQ[_] = False;
 
 EquivalentAutomataQ::usage = "EquivalentAutomataQ[A1, A2] is True if A1 and A2 are automata that recognize the same language.
 EquivalentAutomata[A_1, A_2, ...] yields true if all A_i are equivalent automata.";
-EquivalentAutomataQ[dfa1_?DFAQ, dfa2_?DFAQ] :=
-    With[{statesAscs = States[{dfa1, dfa2}],
-      queue = CreateDataStructure["Queue", {Catenate@IDs[{dfa1, dfa2}, "Initial"]}],
-      alph = If[!SameAlphabetQ[dfa1, dfa2], Return[False], Alphabet[dfa1]]},
-      Module[{enqueue},
-        enqueue[tuple_] := (queue["Push", tuple]; enqueue[tuple] = Null);
-        Catch[While[! queue["EmptyQ"],
-          With[{tup = MapThread[Construct, {statesAscs, queue["Pop"]}]},
-            If[Xor @@ (TerminalQ /@ tup), (* If an accepting state is found in the symmetric difference *)
-              Throw[False], (* The automata are not equivalent *)
-              Scan[enqueue[Transitions[tup, #]] &, alph]]]];
-        True (* If the queue is exhausted without finding an accepting state, L(dfa1) == L(dfa2) *)
-        ]]];
-EquivalentAutomataQ[nfa1_?NFAQ, nfa2_?NFAQ] :=
-    With[{statesAscs = States[{nfa1, nfa2}],
-      queue = CreateDataStructure["Queue", {EpsilonClosure /@ {nfa1, nfa2}}],
-      alph = DeleteCases[Alphabet /@ Unevaluated@Intersection[nfa1, nfa2], EmptyString]},
-      Module[{enqueue},
-        enqueue[tuple_] := (queue["Push", tuple]; enqueue[tuple] = Null);
-        Catch[While[! queue["EmptyQ"],
-          With[{tup = MapThread[Lookup, {statesAscs, queue["Pop"]}]},
-            If[Xor @@ (AnyTrue[TerminalQ] /@ tup), (* If an accepting state is found in the symm diff DFA *)
-              Throw[False], (* The symmetric difference is not empty *)
-              Scan[enqueue[MapThread[EpsilonClosure,
-                {OperatorApplied[Lookup, {3, 1, 2}][#, {}]
-                    /@ (mergeTransitions /@ tup), statesAscs}]] &,
-                alph]]]];
-        True (* If the queue is exhausted without finding an accepting state, L(nfa1) == L(nfa2) *)
-        ]]];
-EquivalentAutomataQ[A1_?AutomatonQ, A2_?AutomatonQ] := EquivalentAutomataQ[NFA[A1], NFA[A2]];
 EquivalentAutomataQ[_?AutomatonQ] = True;
+EquivalentAutomataQ[A1_?AutomatonQ, A2_?AutomatonQ] := productStateTerminalPairNoneTrue[A1, A2, Xor];
 EquivalentAutomataQ[_, _] = False;
-EquivalentAutomataQ[Ai : Repeated[_, {3, Infinity}]] := Catch[
-  With[{m = First@MinimalBy[{Ai}, StateCount]},
-    Scan[If[!EquivalentAutomataQ[m, #], Throw[False]]&, DeleteCases[{Ai}, m]];
-    True]];
+EquivalentAutomataQ[Ai : Repeated[_, {3, Infinity}]] := With[
+  {m = First@MinimalBy[{Ai}, StateCount]},
+  AllTrue[DeleteCases[{Ai}, m], EquivalentAutomataQ[m, #] &]
+];
+
+SubsetAutomatonQ::usage = "SubsetAutomatonQ[A1, A2] returns True if the language recognized by automaton A1 is a subset of the language recognized by automaton A2.
+SubsetAutomatonQ[A, A_1, A_2, ...] yields True if SubsetAutomaton[A, A_i] is true for all A_i.
+SubsetAutomatonQ[A] represents an operator form of SubsetAutomatonQ that can be applied to an expression.";
+SubsetAutomatonQ[A1_?AutomatonQ, A2_?AutomatonQ] := productStateTerminalPairNoneTrue[A1, A2, {#1 && ! #2} &];
+SubsetAutomatonQ[_, _] = False;
+SubsetAutomatonQ[A1_][A2_] := SubsetAutomatonQ[A1, A2];
+SubsetAutomatonQ[A_, Ai : Repeated[_, {2, Infinity}]] := AllTrue[{Ai}, SubsetAutomatonQ[A]];
+
+EquivalentLanguageQ::usage = "EquivalentLanguageQ[L_1, L_2, ...] returns True if all L_i are automata or regular expressions that describe the same language.";
+EquivalentLanguageQ[L__] := EquivalentAutomataQ @@ Replace[{L}, r_?RegexQ :> ToNFA[r], {1}];
+
+SubsetLanguageQ::usage = "SubsetLanguageQ[L1, L2] yields True if the language recognized by automaton or regular expression L1 is a subset of the language recognized by L2.
+SubsetLanguageQ[L, L_1, L_2, ...] returns True if SubsetLanguageQ[L, L_i] is True for all L_i.
+SubsetLanguageQ[L] represents an operator form of SubsetLanguageQ that can be applied to an expression. ";
+SubsetLanguageQ[L_, Li__] := SubsetAutomatonQ @@ Replace[{L, Li}, r_?RegexQ :> ToNFA[r], {1}];
+SubsetLanguageQ[L_?RegexQ] := SubsetLanguageQ[ToNFA[L]];
+SubsetLanguageQ[L_][Li__] := SubsetLanguageQ[L, Li];
 
 (* ::Section:: *)
 (* Accessors *)
 
 PureAutomaton::usage = "PureAutomaton[A] returns A as an automaton with head NFA or DFA.";
 PureAutomaton[A : (_NFA | _DFA)] := A;
-PureAutomaton[g_] := provided[AnnotationValue[g, "Automaton"], PureAutomatonQ,
+PureAutomaton[g_] := when[AnnotationValue[g, "Automaton"], _?PureAutomatonQ,
   Message[PureAutomaton::inv, HoldForm[PureAutomaton[g]], g,
     "Automaton"]; $Failed];
 
@@ -166,6 +169,14 @@ Transitions[states : {___DFAState | ___NFAState}, rest__] := Lookup[states[[All,
 StateID::usage = "StateID[q] returns the id of q, where q is an expression with head NFAState or DFAState.";
 SetAttributes[StateID, Listable];
 StateID[(DFAState | NFAState)[id_, _, ___]] := id;
+
+StateSuccessors::usage = "StateSuccessors[q] returns a list of IDs comprising the set of states to which q has an outgoing transition.
+StateSuccessors[q, {a_1, a_2, ...}] returns the set of states to which q has an outgoing transition on one of the symbols a_i.";
+StateSuccessors[NFAState[_, d_, ___], (All | PatternSequence[])] := Union @@ Values@d;
+StateSuccessors[NFAState[_, d_, ___], symbols_List] := Union @@ Lookup[d, symbols, {}];
+StateSuccessors[DFAState[_, d_, ___], (All | PatternSequence[])] := DeleteDuplicates@Values@d;
+StateSuccessors[DFAState[_, d_, ___], symbols_List] := DeleteDuplicates@Lookup[d, symbols];
+StateSuccessors[symbols : (_List | All)][s_?StateQ] := StateSuccessors[s, symbols];
 
 States::usage = "States[A] returns an association <|id -> state, ...|> of all states in the DFA or NFA A.
 States[A, \"Values\"] returns a list {state_1, state_2, ...} of all states in the DFA or NFA A.
@@ -281,35 +292,29 @@ ReindexAutomaton[A_?AutomatonQ, allComponents_ : False] :=
 
 ClearAll[TransitiveClosure];
 TransitiveClosure::usage = "TransitiveClosure[q, A] returns the transitive closure of state q in automaton A.
-TransitiveClosure[{q_1, q_2, ...}, A] returns the union (TransitiveClosure[q_1,A] \[Union] TransitiveClosure[q_2, A] \[Union] ...)
+TransitiveClosure[{q_1, q_2, ...}, A] returns the union (TransitiveClosure[q_2,A] \[Union] TransitiveClosure[q_2, A] \[Union] ...)
 TransitiveClosure[A] returns the transitive closure of the initial states of automaton A.
 TransitiveClosure[states, transitions] returns the transitive closure of the given states according to the given transition specifications. The parameter transitions should be an association or list of rules of the form q -> t, where q is a state id, and t is the transition table for q as an association or list of rules.
-TransitiveClosure[..., a] gives the transitive closure of over the symbol a.
 TransitiveClosure[..., {a_1, a_2, ...}] gives the transitive closure over the set of symbols a_1, a_2, ...";
 TransitiveClosure::invstate = "State `1` not found.";
 TransitiveClosure[{}, ___] = {};
-TransitiveClosure[A_?AutomatonQ, symbols_ : All] :=
-    TransitiveClosure[IDs[A, "Initial"], States@A, symbols];
-TransitiveClosure[(Key[stateid_] | stateid : Except[_List]), rest__] :=
-    TransitiveClosure[{stateid}, rest];
-TransitiveClosure[stateids : {__}, Q_, symbols : Except[_List | All]] :=
-    TransitiveClosure[stateids, Q, {symbols}];
-TransitiveClosure[stateids : {__}, A_?AutomatonQ, symbols_ : All] :=
-    TransitiveClosure[stateids, States@A, symbols];
-TransitiveClosure[stateids : {__}, Q : {(_ -> _) ...}, symbols_ : All] :=
-    TransitiveClosure[stateids, Association@Q, symbols];
-TransitiveClosure[stateids : {__}, Q_?AssociationQ, symbols : (_List | All) : All] := With[{
-  neighbors = If[
-    MatchQ[Q, <|(_ -> (_NFAState | (List | Association)[(_ -> _List) ...])) ...|>],
-    Union @@ transitionLookup[#, symbols] &,
-    DeleteDuplicates@transitionLookup[#, symbols] &],
-  state = Lookup[Q, Key@#, Message[TransitiveClosure::invstate, #]; {}] &},
-  Module[{marked},
-    marked[id_] := (marked[Sow[id]] = Null;
-    Scan[marked, neighbors[state@id]]);
-    Block[{$RecursionLimit = Max[$RecursionLimit, 2 * Length[Q] + 1]},
-      First[Reap[Scan[marked, stateids]][[2]], {}]]
-  ]];
+TransitiveClosure[A_?AutomatonQ, syms_List : All] := TransitiveClosure[IDs[A, "Initial"], States@A, syms];
+TransitiveClosure[ids_List, A_?AutomatonQ, syms_List : All] := TransitiveClosure[ids, States@A, syms];
+TransitiveClosure[id : Except[_List], rest__] := TransitiveClosure[{id}, rest];
+TransitiveClosure[ids_List, rules : {(_ -> _) ...}, syms_List : All] := TransitiveClosure[ids, Association@rules, syms];
+TransitiveClosure[ids_List, Q_Association, syms : (_List | All) : All] :=
+    Reap[Module[{push},
+      With[{
+        succs = Which[
+          syms === All, Values,
+          AllTrue[Q, StateQ], Transitions[#, syms, Nothing] &,
+          True, Lookup[#, syms, Nothing] &],
+        lvl = Switch[Q, <|(_ -> (_[(_ -> _List) ...] | _NFAState)) ...|>, {2}, _, {1}],
+        state = Lookup[Q, Key@#, Message[TransitiveClosure::invstate, #]; {}] &,
+        queue = CreateDataStructure["Queue", (push[Sow[#]] = Null; #) & /@ ids]},
+        push[id_] := push[Sow[id]] = (queue["Push", id];);
+        While[! queue["EmptyQ"],
+          Scan[push, succs@state@queue["Pop"], lvl]]]]][[2, 1]];
 
 EpsilonClosure::usage = "EpsilonClosure[A] computes the epsilon closure (that is, the transitive closure over the empty string) of the initial states in the Automaton A.
 EpsilonClosure[q, A] gives the epsilon closure of state q in A.
@@ -320,8 +325,8 @@ EpsilonClosure[A_?AutomatonQ] :=
 EpsilonClosure[states_, transitions_] :=
     TransitiveClosure[states, transitions, {EmptyString}];
 
-StatesPartition::usage = "StatesPartition[dfa] returns a list of partition blocks for the states of dfa, according to the equivalence relation p\[Tilde]q \[DoubleLongLeftRightArrow] For all w\[Element]\!\(\*SuperscriptBox[\(\[CapitalSigma]\), \(*\)]\), \!\(\*OverscriptBox[\(\[Delta]\), \(^\)]\)(p,w) accepts if and only if \!\(\*OverscriptBox[\(\[Delta]\), \(^\)]\)(q,w) accepts";
-
+StatesPartition::usage = "StatesPartition[dfa] returns a list of partition blocks for the states of dfa, according to the equivalence relation \
+p~q \[DoubleLongLeftRightArrow] For all w\[Element]\!\(\*SuperscriptBox[\(\[CapitalSigma]\), \(*\)]\), \!\(\*OverscriptBox[\(\[Delta]\), \(^\)]\)(p,w) accepts if and only if \!\(\*OverscriptBox[\(\[Delta]\), \(^\)]\)(q,w) accepts";
 StatesPartition[dfa_?DFAQ, indices_ : False] :=
     Module[{equivQ},
       equivQ[x_, x_] = True;
@@ -329,7 +334,8 @@ StatesPartition[dfa_?DFAQ, indices_ : False] :=
       SetAttributes[equivQ, Orderless];
       With[{alph = Alphabet@dfa,
         states = States@dfa,
-        partition = CreateDataStructure["DisjointSet", List /@ IDs[dfa]]},
+        partition = CreateDataStructure["DisjointSet", (* Apparently doesn't like packed arrays *)
+          Developer`FromPackedArray[Transpose@List@IDs[dfa]]]},
         Scan[Apply[partition["Unify", ##] &],
           FixedPoint[Select[
             (equivQ[Sequence @@ #] = AllTrue[
@@ -383,42 +389,51 @@ AutomatonConcatenation[Ai : Repeated[_?AutomatonQ, {2, Infinity}]] :=
     With[{nfas = NFA /@ {Ai}, n = Length@{Ai}},
       NFA[
         "states" -> Join @@ MapIndexed[
-          Function[{nfa, pos},
-            With[{i = First@pos,
-              itrules = Switch[pos,
-                {1}, {Automatic, False},
-                {n}, {False, Automatic},
-                _, {False, False}]},
-              If[i >= n, Association,
-                MapAt[AddTransitions[
-                  EmptyString -> (Subscript[#, i + 1] & /@
-                      IDs[nfas[[i + 1]], "Initial"])],
-                  {Key@Subscript[#, i]} & /@ IDs[nfa, "Terminal"]]@*
-                    Association][
-                updateStateRule[Subscript[#, i] &,
-                  itrules] /@ (Values@States@nfa)]]],
+          Function[{nfa, pos}, With[
+            {itrules =
+                Switch[pos,
+                  {1}, {Automatic, False},
+                  {n}, {False, Automatic},
+                  _, {False, False}],
+              i = First@pos},
+            If[i >= n, Association,
+              Composition[
+                MapAt[AddTransitions[EmptyString -> (Subscript[#, i + 1] & /@ IDs[nfas[[i + 1]], "Initial"])],
+                  {Key@Subscript[#, i]}& /@ IDs[nfa, "Terminal"]],
+                Association]]@Map[updateStateRule[Subscript[#, i] &, itrules], States[nfa, "Values"]]]],
           nfas],
         "initial" -> Thread[Subscript[IDs[nfas[[1]], "Initial"], 1]],
         "terminal" -> Thread[Subscript[IDs[nfas[[n]], "Terminal"], n]],
-        "alphabet" -> Union @@ (Alphabet /@ nfas)]]
+        "alphabet" -> Union @@ (Alphabet /@ nfas)]];
 
 AutomatonClosure::usage = "AutomatonClosure[A] returns an NFA for the closure of the language recognized by A with respect to concatenation.";
-AutomatonClosure[A_?AutomatonQ] :=
-    With[{startid = Unique[], terms = IDs[A, "Terminal"],
-      critrule = EmptyString -> IDs[A, "Initial"]},
-      NFA["states" -> MapAt[
-          SetInitial[False],
-          MapAt[
-            AddTransitions[critrule],
-            States@ToNFA[A], List@*Key /@ terms],
-          List@*Key /@ IDs[A, "Initial"]
-        ] ~ Append ~ (startid ->
-            NFAState[startid, Association@critrule, {True, True}]),
-        "initial" -> {startid},
-        "terminal" -> terms ~ Append ~ startid,
-        "alphabet" -> Union[Alphabet[A], {EmptyString}]
-      ]
-    ]
+AutomatonClosure[A_?AutomatonQ] := With[
+  {startid = Unique[], terms = IDs[A, "Terminal"],
+    critrule = EmptyString -> IDs[A, "Initial"]},
+  NFA["states" -> MapAt[
+    SetInitial[False],
+    MapAt[
+      AddTransitions[critrule],
+      States@ToNFA[A], List@*Key /@ terms],
+    Transpose@{Key /@ IDs[A, "Initial"]}
+  ] ~ Append ~ (startid ->
+      NFAState[startid, Association@critrule, {True, True}]),
+    "initial" -> {startid},
+    "terminal" -> terms ~ Append ~ startid,
+    "alphabet" -> Union[Alphabet[A], {EmptyString}]]
+];
+
+productStateTerminalPairNoneTrue[A1_, A2_, pred_] := Module[
+  {t1, t2},
+  t1[_] = False; Scan[(t1[#] = True) &, IDs[A1, "Terminal"]];
+  t2[_] = False; Scan[(t2[#] = True) &, IDs[A2, "Terminal"]];
+  Catch[scanProductDFA[
+    Apply[If[AutomatonType[A1] === DFA === AutomatonType[A2],
+      If[pred[t1[#1], t2[#2]], Throw[False]] &,
+      If[pred[AnyTrue[#1, t1], AnyTrue[#2, t2]], Throw[False]] &]],
+    A1, A2];
+  True]
+];
 
 (* TODO: NFA reduction *)
 (* TODO: Pushdown Automata *)
