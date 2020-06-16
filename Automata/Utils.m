@@ -18,20 +18,20 @@
 Package["Automata`"]
 
 PackageScope["absOpt"]
+PackageScope["rangeOver"]
+PackageScope["aside"]
+PackageScope["unless"]
+PackageScope["when"]
 PackageScope["filterOpts"]
 PackageScope["validatedMethod"]
 PackageScope["intProp"]
 PackageScope["specificArguments"]
 PackageScope["toAlternatives"]
-PackageScope["unless"]
-PackageScope["alt"]
-PackageScope["provided"]
+PackageScope["autoAlt"]
+PackageScope["rotateToFront"]
 PackageScope["randomSubset"]
-PackageScope["recomputeThumbnail"]
 PackageScope["makeStateSummaryBoxes"]
 PackageScope["makeAutomatonSummaryBoxes"]
-PackageScope["graphRegexArray"]
-
 PackageScope["mergeTransitions"]
 PackageScope["sowPredicate"]
 PackageScope["transitionLookup"]
@@ -39,20 +39,50 @@ PackageScope["updateState"]
 PackageScope["updateStateRule"]
 PackageScope["makeAlphabet"]
 PackageScope["makeStateIDs"]
-PackageScope["productStates"]
-PackageScope["productConstruction"]
-PackageScope["reductionCandidateRankingFunction"]
-PackageScope["toRegexArray"]
-PackageScope["reduceRegexArray"]
 
+(*
+(* ::Section:: *)
+(* Clear Symbols *)
+Unprotect[$defaultDFAIcon, $defaultNFAIcon];
+ClearAll[absOpt, rangeOver, aside, unless, when, filterOpts, validatedMethod, methodName, intProp, specificArguments,
+  toAlternatives, autoAlt, randomSubset, rotateToFront, makeStateSummaryBoxes, makeAutomatonSummaryBoxes,
+  mergeTransitions, sowPredicate, transitionLookup, updateState, updateStateRule, makeAlphabet,
+  makeStateIDs, spanLength, makeStateIcon, makeStateUpperSummary, makeStateTransitionSummary, makeAutomatonUpperSummary,
+  makeAutomatonStateSummary, $defaultDFAIcon, $defaultNFAIcon];
+*)
 
 (* ::Section:: *)
-
-(* ::Section:: *)
-(* Private Macros *)
+(* Macros *)
 
 absOpt::usage = "absOpt[expr, name] returns the value of the rule obtained from AbsoluteOptions[expr, name]";
 absOpt[expr_, name_] := AbsoluteOptions[expr, name][[1, 2]];
+
+rangeOver::usage = "rangeOver[expr] returns Range[Length[expr]]
+rangeOver[expr, i] returns Range[d_i], where d_i is the size of dimension i in expr.";
+rangeOver[expr_] := Range[Length[expr]];
+rangeOver[expr_, dim_] := Range[Extract[Dimensions[expr], dim]];
+
+aside::usage = "aside[f, expr] evaluates f[expr], then returns expr.
+aside[{f1, f2, ...}, expr] evaluates f1[expr], f2[expr], ... in sequence, then returns expr.
+aside[funcs] represents an operator form of aside that can be applied to expressions.";
+aside[f_, expr_] := (f[expr]; expr);
+aside[f_][expr_] := (f[expr]; expr);
+aside[fs_List, expr_] := (Do[f[expr], {f, fs}]; expr);
+aside[fs_List][expr_] := (Do[f[expr], {f, fs}]; expr);
+
+unless::usage = "unless[expr, form_1, alt_1, form_2, alt_2, ...] evaluates expr, then compares it to each of the form_i in turn, evaluating and returning the alt_i corresponding to the first match, or expr itself if no match is found.";
+SetAttributes[unless, HoldRest];
+unless[value_, alts : PatternSequence[_, _] ..] := Switch[value, alts, _, value];
+SyntaxInformation[unless] = {"ArgumentsPattern" -> {_, _, __}};
+
+when::usage = "when[expr, form] returns expr if it matches form, and Null otherwise.
+when[expr, form, alt] returns expr if it matches form, and alt otherwise.";
+SetAttributes[when, HoldRest];
+when[expr_, form_] := If[MatchQ[expr, form], expr];
+when[expr_, form_, alt_] := If[MatchQ[expr, form], expr, alt];
+
+(* ::Section:: *)
+(* Functions *)
 
 filterOpts::usage = "filterOpts[{opt_1 -> v_1, opt_2 -> v_2, ...}, f] returns a sequence opt_i -> v_i where opt_i matches the left-hand side of a rule in Options[f].
 filterOpts[{opt_1 -> v_1, ...}, {f1, f2, ...}] returns the sequence opt_i -> v_i, where opt_i matches the lhs of a rule in any of Options[f1], Options[f2], ...
@@ -73,9 +103,14 @@ filterOpts[opts_?OptionQ, f_, except_] :=
 validatedMethod::usage = "validatedMethod[given, {m1, m2, ...}, caller] returns given if it is one of {m1, m2, ...}. \
 Otherwise, it issues the message caller::moptx, and returns Automatic.
 validatedMethod[..., default] returns default instead of Automatic.";
-validatedMethod[given_, expected_, caller_, default_ : Automatic] :=
-    If[MemberQ[expected, given], given,
-      Message[caller::moptx, given, caller, expected]; default];
+validatedMethod[given_, expected_, caller_, default_ : Automatic] := With[
+  {expectedNames = methodName /@ expected},
+  If[MemberQ[expectedNames, methodName@given],
+    methodName@given,
+    Message[caller::moptx, given, caller, expectedNames]; default]];
+
+methodName[{name_, ___}] := name;
+methodName[name_] := name;
 
 intProp::usage = "intProp[x, total] returns x if x is an integer, and Ceiling[x*total] otherwise.";
 intProp[p_Integer, _] := p;
@@ -92,25 +127,14 @@ toAlternatives::usage = "toAlternatives[{p1, p2, ...}] returns p1 | p2 | ...";
 toAlternatives[{a_, b__}] := Alternatives[a, b];
 toAlternatives[{a_}] := a;
 
-unless::usage = "unless[value, predicate] returns Null if predicate[value] is True, and value otherwise.
-unless[value, predicate, alternative] returns alternative if predicate[value] is True, and value otherwise.";
-SetAttributes[unless, HoldRest];
-unless[value_, predicate_] := If[! predicate[value], value];
-unless[value_, predicate_, alternative_] :=
-    If[predicate[value], alternative, value];
+autoAlt::usage = "autoAlt[expr, alternative] returns alternative if expr === Automatic, and expr otherwise.";
+SetAttributes[autoAlt, HoldRest];
+autoAlt[value_, alt_] := If[value === Automatic, alt, value];
 
-provided::usage = "provided[value, predicate] returns value if predicate[value] is True, and Null otherwise.
-provided[value, predicate, alternative] returns value if predicate[value] is True, and alternative otherwise.";
-SetAttributes[provided, HoldRest];
-provided[value_, predicate_] := If[predicate[value], value];
-provided[value_, predicate_, alternative_] :=
-    If[predicate[value], value, alternative];
-
-alt::usage = "alt[value, alternative] returns alternative if value === Automatic, and value otherwise.
-alt[value, alternative, pattern] returns altermative if value matches pattern, and value otherwise.";
-SetAttributes[alt, HoldRest];
-alt[value_, alternative_, patt_ : Automatic] :=
-    If[MatchQ[value, patt], alternative, value];
+rotateToFront::notfound = "No subexpression matching `1` was found in `2`.";
+rotateToFront::usage = "rotateToFront[expr, form] cycles the elements in expr to put the first element matching form in position 1";
+rotateToFront[expr_, form_] := Catch@RotateLeft[expr,
+  First@FirstPosition[expr, form, Message[rotateToFront::notfound, form, expr]; Throw[expr]] - 1];
 
 randomSubset::usage = "randomSubset[{e_1, e_2, ...}] gives a pseudorandom subset of the e_i in pseudorandom order.
 randomSubset[list, n] returns a list of n random subsets.
@@ -210,11 +234,11 @@ updateState[state, f, spec] returns a copy of state whose ID and transitions are
 updateState[f] and updateState[f, spec] return operator forms of updateState that can be applied to states.";
 updateState[DFAState[id_, d_, rest___], namefn_] := DFAState[namefn[id], namefn /@ d, rest];
 updateState[s : DFAState[id_, d_, ___], namefn_, {init_, term_}] :=
-    DFAState[namefn[id], namefn /@ d, {alt[init, InitialQ@s], alt[term, TerminalQ@s]}];
+    DFAState[namefn[id], namefn /@ d, {autoAlt[init, InitialQ@s], autoAlt[term, TerminalQ@s]}];
 updateState[DFAState[id_, d_, ___], namefn_, rest_] := DFAState[namefn[id], namefn /@ d, rest];
 updateState[NFAState[id_, d_, rest___], namefn_] := NFAState[namefn[id], Map[namefn, d, {2}], rest];
 updateState[s : NFAState[id_, d_, ___], namefn_, {init_, term_}] :=
-    NFAState[namefn[id], Map[namefn, d, {2}], {alt[init, InitialQ@s], alt[term, TerminalQ@s]}];
+    NFAState[namefn[id], Map[namefn, d, {2}], {autoAlt[init, InitialQ@s], autoAlt[term, TerminalQ@s]}];
 updateState[s : NFAState[id_, d_, ___], namefn_, rest_] := NFAState[namefn[id], Map[namefn, d, {2}], rest];
 updateState[namefn_] := OperatorApplied[updateState][namefn];
 updateState[namefn_, rest_] := OperatorApplied[updateState, {3, 1, 2}][namefn, rest];
