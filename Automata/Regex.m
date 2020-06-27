@@ -18,6 +18,8 @@ PackageExport["EmptyString"]
 PackageExport["RENull"]
 PackageExport["RegexQ"]
 PackageExport["CompoundRegexQ"]
+PackageExport["RegexMatchQ"]
+PackageExport["RegexNormal"]
 PackageExport["RegexLength"]
 PackageExport["REUnion"]
 PackageExport["REConcat"]
@@ -30,7 +32,15 @@ PackageExport["RandomRegex"]
 PackageExport["RegexParse"]
 PackageExport["ToRegex"]
 
+PackageScope["regexLinearize"]
+PackageScope["pSet"]
+PackageScope["dSet"]
+PackageScope["fSet"]
+
 (* ::Section:: *)
+(* Regex *)
+
+(* ::Subsection:: *)
 (* Clear Symbols *)
 (*
 Unprotect[EmptyString, RENull, REUnion, REConcat, REClosure];
@@ -42,21 +52,19 @@ ClearAll[
 ];
 *)
 
-(* ::Section:: *)
+(* ::Subsection:: *)
 (* Symbols *)
+
 EmptyString::usage = "EmptyString is a symbol representing the string of length 0.";
-EmptyString /: MakeBoxes[EmptyString, StandardForm] := InterpretationBox[
-  StyleBox["\[CurlyEpsilon]", FontColor -> GrayLevel[0.5]], EmptyString];
-EmptyString /: MakeBoxes[EmptyString, TraditionalForm] := InterpretationBox["\[CurlyEpsilon]", EmptyString];
 ToString[EmptyString] ^= "";
 Protect[EmptyString];
 
+
 RENull::usage = "RENull is a symbol for the regular expression capturing the empty set, i.e., the expression that matches nothing.";
-RENull /: MakeBoxes[RENull, StandardForm | TraditionalForm] := InterpretationBox["\[EmptySet]", RENull];
 ToString[RENull] ^= "\[EmptySet]";
 Protect[RENull];
 
-(* ::Section:: *)
+(* ::Subsection:: *)
 (* Properties *)
 RegexQ::usage = "RegexQ[expr] yields True when expr is atomic, or has head REUnion, REConcat or REClosure.
 RegexQ[expr, patt] gives True if expr is RENull or EmptyString, or is atomic and matches patt, or is a compound regex where every subexpression at level -1 that is not RENull or EmptyString matches patt.";
@@ -64,6 +72,7 @@ RegexQ[_REConcat | _REUnion | _REClosure | _?AtomQ] = True ;
 RegexQ[_] = False;
 RegexQ[r_, patt_] := MatchQ[r, patt] || CompoundRegexQ[r, patt];
 RegexQ[_, _] = False;
+
 
 CompoundRegexQ::usage = "CompoundRegexQ[expr] returs True if expr has head REUnion, REConcat, or REClosure.
 CompoundRegexQ[expr, patt] returns True if expr is a compound regex where every subexpression at level -1 that is not RENull or EmptyString matches patt.";
@@ -73,16 +82,36 @@ CompoundRegexQ[r : (_REConcat | _REUnion | _REClosure), patt_] :=
     AllTrue[Level[r, {-1}], MatchQ[patt | RENull | EmptyString]];
 CompoundRegexQ[_, _] = False;
 
+
+RegexMatchQ::usage = "RegexMatchQ[regex, expr] returns True if expr is matched by regex.
+RegexMatchQ[expr] represents an operator form of RegexMatchQ.";
+RegexMatchQ[r_, EmptyString] := matchesEmptyQ[r];
+RegexMatchQ[r_ /; RegexQ[r, _String], input_String] := StringMatchQ[input, RegexNormal@r];
+RegexMatchQ[r_ /; RegexQ[r, _String], EmptyString] := StringMatchQ["", RegexNormal@r];
+RegexMatchQ[r_ /; RegexQ[r, _String], _] = False;
+RegexMatchQ[r_, input_] := ToNFA[r][input];
+RegexMatchQ[input_][r_] := RegexMatchQ[r, input];
+
+
+RegexNormal::usage = "RegexNormal[regex] converts the regex into an expression with head RegularExpression recognizing strings from the same language.";
+RegexNormal[RENull] = RegularExpression["a^"];
+RegexNormal[r_?RegexQ] := RegularExpression@ToString@Map[
+  RightComposition[ToString,
+    StringReplace[a : Characters[".$^?*+|{}()[]\\"] :> "\\" ~~ a],
+    StringReplace[{s : (StartOfString ~~ _ | ("\\" ~~ _) ~~ EndOfString) :> s, s__ :> "(" ~~ s ~~ ")"}]],
+  r, {-1}];
+
+
 RegexLength::usage = "RegexLength[regex] gives the number of atomic subexpressions in regex. RegexLength is defined to be 0 in the special cases of RENull and EmptyString.";
 SetAttributes[RegexLength, Listable];
 RegexLength[R_?CompoundRegexQ] := Count[R, _, {-1}];
 RegexLength[RENull | EmptyString] = 0;
 RegexLength[_?AtomQ] = 1;
 
-(* ::Section:: *)
+(* ::Subsection:: *)
 (* Operators *)
 
-(* ::Subsection:: *)
+(* ::Subsubsection:: *)
 (* Union *)
 REUnion::usage = "REUnion[e_1, e_2, ...] represents a regex matching the union e_1 | e_2 | ... of the expressions e_i.";
 Default[REUnion] = RENull;
@@ -97,7 +126,7 @@ REUnion /: ToString[u_REUnion] :=
     "(" <> StringRiffle[ToString /@ (List @@ u), "|"] <> ")";
 Protect[REUnion];
 
-(* ::Subsection:: *)
+(* ::Subsubsection:: *)
 (* Concatenation *)
 REConcat::usage = "REUnion[e_1, e_2, ...] represents a regex matching the concatenation e_1 e_2 ... of the expressions e_i.";
 Default[REConcat] = EmptyString;
@@ -108,19 +137,19 @@ SetAttributes[REConcat, {Flat, OneIdentity}];
 REConcat /: ToString[c_REConcat] := StringRiffle[ToString /@ (List @@ c), ""];
 Protect[REConcat];
 
-(* ::Subsection:: *)
+(* ::Subsubsection:: *)
 (* Closure *)
 REClosure::usage = "REClosure[e] represents a regex matching the closure of expression e with respect to concatenation. This is defined as the set {EmptyString, e, ee, eee, ...}.";
 REClosure[RENull | EmptyString] = EmptyString;
 REClosure[REClosure[x_]] := REClosure[x];
-REClosure /: MakeBoxes[REClosure[x_], StandardForm | TraditionalForm] := MakeBoxes@SuperStar[x];
+REClosure /: MakeBoxes[REClosure[x_], form : (StandardForm | TraditionalForm)] := MakeBoxes[SuperStar@x, form];
 REClosure /: ToString[REClosure[c_REConcat]] := "(" <> ToString[c] <> ")*";
 REClosure /: ToString[c_REClosure] := ToString @@ c <> "*";
 REClosure[_, x__] /; Message[REClosure::argx, REClosure, Length[{x}] + 1] = Null;
 SyntaxInformation[REClosure] = {"ArgumentsPattern" -> {_}};
 Protect[REClosure];
 
-(* ::Section:: *)
+(* ::Subsection:: *)
 (* Transformation *)
 
 RegexSimplify::usage = "RegexSimplify[r] attempts to simplify the provided regular expression using simple pattern matching.";
@@ -128,11 +157,13 @@ RegexSimplify[r_, opts : OptionsPattern[ReplaceRepeated]] :=
     ReplaceRepeated[r, $regexSimplificationRules,
       filterOpts[{opts}, ReplaceRepeated]];
 
+
 RegexFactor::usage = "RegexFactor[r] attempts to factor the given regular expression.";
 RegexFactor[r_, opts : OptionsPattern[ReplaceRepeated]] :=
     ReplaceRepeated[r,
       $regexFactorizationRules,
       filterOpts[{opts}, ReplaceRepeated]];
+
 
 RegexFullSimplify::usage = "RegexFullSimplify[r] applies additional techniques of factorization and regular language equivalence to simplify the given regular expression.";
 Options[RegexFullSimplify] = {"Factorize" -> True};
@@ -144,32 +175,40 @@ RegexFullSimplify[r_, opts : OptionsPattern[{RegexFullSimplify, ReplaceRepeated}
         $regexFactorizationRules, Nothing]}],
       filterOpts[{opts}, ReplaceRepeated]];
 
+
 RegexExpand::usage = "RegexExpand[r] expands the given regular expression by distributing concatenation over unions.";
 RegexExpand[c_REConcat] := If[FreeQ[c, _REUnion], c,
   Distribute[c, REUnion, REConcat, REUnion, RegexExpand /@ REConcat[##] &]];
 RegexExpand[r_?CompoundRegexQ] := RegexExpand /@ r;
 RegexExpand[a_] := a;
 
-(* ::Section:: *)
+(* ::Subsection:: *)
 (* Construction *)
 
 RandomRegex::usage = "RandomRegex[n, k] returns a random regular expression on n symbols from an alphabet of length k.
 RandomRegex[n,k,p] returns a random regular expression of n symbols from an alphabet of length k, where p is the probability of grouping.";
 RandomRegex::probprm = "Parameter `1` at position `2` in `3` is expected to be a probability strictly less than 1.";
 Options[RandomRegex] = {
-  "Alphabet" -> Automatic,
-  "AlphabetFunction" -> Automatic};
-RandomRegex[n_, k_, p : _?NumericQ : 0.5, OptionsPattern[]] :=
-    With[{alph = makeAlphabet[k, OptionValue["Alphabet"], OptionValue["AlphabetFunction"]]},
-      Replace[
-        NestWhile[
-          Split[#, RandomChoice[{1 - p, p} -> {True, False}] &] &,
-          RandomChoice[1 ;; k, n],
-          Length[#] > 1 &,
-          1, $IterationLimit, -1],
-        {{a_} :> (RandomChoice[{REUnion, REConcat, REClosure}][a]),
-          {a_, b__} :> (RandomChoice[{REUnion, REConcat}][a, b])},
-        All] /. AssociationThread[Range[k], alph]];
+  AlphabetFunction -> Automatic,
+  EpsilonProbability -> 0
+};
+RandomRegex[n_Integer, alphin : (_List | _Integer), p : _?NumericQ : 0.5, OptionsPattern[]] :=
+    With[{k = unless[alphin, _List, Length@alphin]},
+      With[{alph = unless[alphin, _Integer, makeAlphabet[k, OptionValue["AlphabetFunction"]]]},
+        Replace[
+          NestWhile[
+            Split[#, RandomChoice[{1 - p, p} -> {True, False}] &] &,
+            ReplacePart[RandomChoice[alph, n],
+              toAlternatives@RandomSample[1 ;; n,
+                RandomVariate[BinomialDistribution[n, OptionValue[EpsilonProbability]]]] -> EmptyString
+            ],
+            Length[#] > 1 &,
+            1, $IterationLimit, -1],
+          {{a_} :> (RandomChoice[{REUnion, REConcat, REClosure}][a]),
+            {a_, b__} :> (RandomChoice[{REUnion, REConcat}][a, b])},
+          All]]
+    ];
+
 
 RegexParse::usage = "RegexParse[string] converts a regex in string form to an expression in terms of REUnion, REConcat, and REClosure. ";
 RegexParse::parsererr = "Something happened at input `1` in `2`";
@@ -178,40 +217,97 @@ Options[RegexParse] = {"ParseTree" -> False};
 RegexParse[string_String, OptionsPattern[]] := With[{
   w = CreateDataStructure["Queue", Characters[string]]["Push", EndOfString],
   expr = With[{ops = If[OptionValue["ParseTree"], Inactive, Identity]
-      /@ <|"|" -> REUnion, "~" -> REConcat, "*" -> REClosure|>},
+      /@ <|"|" -> REUnion, "." -> REConcat, "*" -> REClosure|>},
     (ops[#1][##2]) &],
-  binaryQ = MatchQ["|" | "~"],
+  binaryQ = MatchQ["|"],
   postfixQ = MatchQ["*"],
-  varQ = (StringQ[#] && StringMatchQ[#, RegularExpression["[^*()|~]"]]) &,
-  prec = <|"|" -> 0, "~" -> 1, "*" -> 2|>,
-  rprec = <|"|" -> 1, "~" -> 2, "*" -> 2|>,
-  nprec = <|"|" -> 0, "~" -> 1, "*" -> 1|>},
-  Module[{A, expectAfter},
+  varQ = (StringQ[#] && StringMatchQ[#, RegularExpression["[^*()|\\\\]"]]) &,
+  concatableQ = StringQ[#] && StringMatchQ[#, RegularExpression["[^*)|]"]] &,
+  prec = <|"|" -> 0, "." -> 1, "*" -> 2|>,
+  rprec = <|"|" -> 1, "." -> 2, "*" -> 2|>,
+  nprec = <|"|" -> 0, "." -> 1, "*" -> 1|>},
+  Module[{A, expectAfter, escape},
     expectAfter[return_, c_] := With[{d = w["Pop"]},
       If[MatchQ[d, c], return,
         Throw[Failure["SyntaxError",
-          <| "MessageTemplate" -> "Expected `1` at position `2` but received `3`.",
-            "MessageParameters" -> {c, StringLength[string] - w["Length"], d}|>]]]];
+          <|"MessageTemplate" -> "Expected `1` at position `2` but received `3`.",
+            "MessageParameters" -> {c, StringLength[string] - w["Length"], d}|>]]
+      ]];
+    escape[c_] := With[{d = w["Pop"]},
+      If[StringQ[d] &&
+          StringMatchQ[d, RegularExpression["[*()|\\\\]"]], d,
+        Throw[Failure["SyntaxError",
+          <|"MessageTemplate" -> "Unrecognized escape sequence `1``2` at position `3`.",
+            "MessageParameters" -> {c, d, StringLength[string] - w["Length"]}|>]]]];
+
     A[p_] := Module[{
       t = Switch[w["Peek"],
-        "(", expectAfter[w["Pop"]; A[0], ")"], _?varQ, w["Pop"] ,
-        _, EmptyString], nxt = w["Peek"], r = 2, s},
+        "(", expectAfter[w["Pop"]; A[0], ")"],
+        "\\", escape[w["Pop"]],
+        _?varQ, w["Pop"],
+        _, EmptyString],
+      nxt = w["Peek"], r = 2, s},
       While[True,
         t = Which[
           binaryQ[nxt] && p <= prec[nxt] <= r, expr[s = w["Pop"], t, A[rprec[s]]],
           postfixQ[nxt] && p <= prec[nxt] <= r, expr[s = w["Pop"], t],
-          (varQ[nxt] || MatchQ[nxt, "("]) && p <= prec["~"] <= r, expr[s = "~", t, A[rprec[s]]],
-          True, Break[]];
+          concatableQ[nxt] && p <= prec["."] <= r,
+          expr[s = ".", t, A[rprec[s]]], True, Break[]];
         {r, nxt} = {nprec[s], w["Peek"]}];
       t];
-    (* Algorithm start *)
+    (*Algorithm start*)
     Catch@expectAfter[A[0], EndOfString]]];
+
 
 ToRegex::usage = "ToRegex[A] converts the automaton A to an equivalent regular expression.";
 Options[ToRegex] = {Method -> Automatic};
 ToRegex[A_?AutomatonQ, opts : OptionsPattern[reduceRegexArray]] :=
     reduceRegexArray[toRegexArray[A], filterOpts[{opts}, reduceRegexArray]];
 ToRegex[r_?RegexQ, OptionsPattern[reduceRegexArray]] := r;
+
+(* ::Subsection:: *)
+(* Package Scope *)
+
+regexLinearize::usage = "regexLinearize[regex] linearizes regex by indexing each character occurrence.
+regexLinearize[regex, i] linearizes regex by indexing each character occurrence, starting at i.
+regexLinearize[regex, i, True] returns a list {r, {a_1, a_2, ...}} where r is the linearization of regex, and the a_i are the symbols in the alphabet of r";
+regexLinearize[r_, starti_Integer : 1, returnAlphabet_ : False] := Module[
+  {i = starti,
+    patt = Except[_REUnion | _REClosure | _REConcat | REUnion | REClosure | REConcat | EmptyString] },
+  If[returnAlphabet,
+    Reap[r /. p : patt :> Sow[Subscript[p, i++], "newalph"], "newalph", Sequence @@ ##2 &],
+    r /. p : patt :> Subscript[p, i++]]
+];
+
+
+pSet::usage = "pSet[regex] returns the set of prefix characters of strings recognized by regex.";
+pSet[RENull | EmptyString | Subscript[EmptyString, _] | PatternSequence[]] = {};
+pSet[HoldPattern[REUnion[x__]]] := Catenate[pSet /@ {x}];
+pSet[HoldPattern[REClosure[x_]]] := pSet[x];
+pSet[HoldPattern[REConcat[
+  Longest[x___?matchesEmptyQ],
+  Longest[y : RepeatedNull[_, 1]],
+  ___]]] := Catenate[{Catenate[pSet /@ {x}], pSet[y]}];
+pSet[x_] := {x};
+
+dSet::usage = "dSet[regex] returns the set of suffix characters of strings recognized by regex.";
+dSet[RENull | EmptyString | Subscript[EmptyString, _], PatternSequence[]] = {};
+dSet[HoldPattern[REUnion[x__]]] := Catenate[dSet /@ {x}];
+dSet[HoldPattern[REClosure[x_]]] := dSet[x];
+dSet[HoldPattern[REConcat[
+  Shortest[___],
+  RepeatedNull[x_, 1],
+  Longest[y___?matchesEmptyQ]]]] := Catenate[{dSet[x], Catenate[dSet /@ {y}]}];
+dSet[x_] := {x};
+
+fSet::usage = "fSet[regex] returns the set of factors of length 2 in regex.";
+fSet[HoldPattern[REUnion[x__]]] := Catenate[fSet /@ {x}];
+fSet[HoldPattern[REClosure[x_]]] := Catenate[{fSet[x], Tuples[{dSet[x], pSet[x]}]}];
+fSet[HoldPattern[REConcat[x_, y_]]] := Catenate[{fSet[x], fSet[y], Tuples[{dSet[x], pSet[y]}]}];
+fSet[_] = {};
+
+(* ::Subsection:: *)
+(* Private Functions *)
 
 (* Convert to expression NFA represented as a SparseArray adjacency matrix.
    initial and terminal state of eNFA at positions 1 and -1 respectively  *)
@@ -269,9 +365,16 @@ reduceRegexArray[regexArray_?SquareMatrixQ, OptionsPattern[]] := Module[{
       If[Sort@perm === idxs, Scan[reduce, perm],
         Message[reduceRegexArray::badorder, idxs]; Scan[reduce, idxs]]],
       _, With[{next = nextEliminationFunction[arr, method, Break[]]},
-      While[True, reduce@next[]]]]];
-  reduce[0]
+      While[True, reduce@next[]]]];
+    reduce[0]]
 ];
+
+
+matchesEmptyQ[EmptyString | _REClosure] = True;
+matchesEmptyQ[HoldPattern[REUnion[x__]]] := AnyTrue[{x}, matchesEmptyQ];
+matchesEmptyQ[HoldPattern[REConcat[x__]]] := AllTrue[{x}, matchesEmptyQ];
+matchesEmptyQ[_] = False;
+
 
 uwExpr[uw_, uv_, vv_, vw_] := REUnion[uw, REConcat[uv, REClosure[vv], vw]];
 SetAttributes[regexArrayEliminate, HoldFirst];
@@ -288,6 +391,7 @@ regexArrayEliminate[arr_, simp_][v_] := With[
     Flatten@arr[[v]]["NonzeroPositions"]];
   arr[[v, All]] = arr[[All, v]] = RENull;
 ];
+
 
 SetAttributes[nextEliminationFunction, HoldAll];
 nextEliminationFunction[arr_, method_, default_] := With[
@@ -376,6 +480,7 @@ bridgeStates[arr_SparseArray, s_, t_, subset_] := With[{
       Delete[path, Transpose@List@Flatten@{1, -1, notbridges@path}]]]
 ];
 
+
 horizontalChop[arr_SparseArray, s_ : 1, t_ : Automatic, subset_ : All] :=
     horizontalChop[arr, s, autoAlt[t, Length@arr], subset];
 horizontalChop[arr_SparseArray, s_, t_, subset_] := With[
@@ -393,14 +498,17 @@ horizontalChop[arr_SparseArray, s_, t_, subset_] := With[
     If[groups["EmptyQ"], {{s, t}}, arrangeFirstLast[#, s, t] & /@ groups["Subsets"]]]
 ];
 
+
 adjacencyIntersection[arr_SparseArray, subset_] :=
     If[subset === All, arr["AdjacencyLists"],
       Intersection[subset, #] & /@ arr["AdjacencyLists"]];
+
 
 arrangeFirstLast[l_List, first_, last_] :=
     {first, Splice@DeleteDuplicates[l, first | last], last};
 arrangeFirstLast[expr_, first_, last_] :=
     expr /. h_[ p : OrderlessPatternSequence[Except[first | last] ...]] :> h[first, p, last];
+
 
 findPath[arr_SparseArray, s_ : 1, t_ : Automatic, subset_ : All] :=
     findPath[arr, s, autoAlt[t, Length@arr], subset];
@@ -417,6 +525,7 @@ findPath[arr_SparseArray, s_, t_, subset_] := With[
         Null, {}]]]
 ];
 
+
 $regexFactorizationRules = Dispatch[{
   HoldPattern[u : REUnion[x_, REConcat[x_, r_]]] :>
       REConcat[x, REUnion[r, EmptyString]],
@@ -427,6 +536,7 @@ $regexFactorizationRules = Dispatch[{
     {2, Infinity}]]
   ] :> REConcat[prefix, Replace[u, REConcat[prefix, x_., suffix] :> x, {1}], suffix]
 }];
+
 
 $regexSimplificationRules = Dispatch[{
   HoldPattern[REConcat[c : REClosure[REConcat[(x_) ..] | x_], x_]
@@ -450,6 +560,7 @@ $regexSimplificationRules = Dispatch[{
   HoldPattern[REClosure[c : REConcat[__REClosure]]
   ] :> REClosure[REUnion @@ Sequence @@@ c] (*  [x*y*]* -> [x| y]*  *)
 }];
+
 
 $regexAdditionalSimplificationRules = Dispatch[{
   HoldPattern[REUnion[x_, y_] /; SubsetLanguageQ[x, y]] :> y ,

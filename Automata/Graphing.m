@@ -17,9 +17,12 @@ Package["Automata`"]
 PackageScope["automatonGraph"]
 PackageScope["makeThumbnail"]
 
-(*
 (* ::Section:: *)
+(* Graphing *)
+
+(* ::Subsection:: *)
 (* Clear Symbols *)
+(*
 ClearAll[ automatonGraph, makeThumbnail, recomputeThumbnail, squareRange, doubleCircle, automatonEdgeLabel, toEdges,
   quickGraph, graphRegexArray
 ];
