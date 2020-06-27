@@ -40,9 +40,12 @@ PackageScope["updateStateRule"]
 PackageScope["makeAlphabet"]
 PackageScope["makeStateIDs"]
 
-(*
 (* ::Section:: *)
+(* Utils *)
+
+(* ::Subsection:: *)
 (* Clear Symbols *)
+(*
 Unprotect[$defaultDFAIcon, $defaultNFAIcon];
 ClearAll[absOpt, rangeOver, aside, unless, when, filterOpts, validatedMethod, methodName, intProp, specificArguments,
   toAlternatives, autoAlt, randomSubset, rotateToFront, makeStateSummaryBoxes, makeAutomatonSummaryBoxes,
@@ -51,7 +54,7 @@ ClearAll[absOpt, rangeOver, aside, unless, when, filterOpts, validatedMethod, me
   makeAutomatonStateSummary, $defaultDFAIcon, $defaultNFAIcon];
 *)
 
-(* ::Section:: *)
+(* ::Subsection:: *)
 (* Macros *)
 
 absOpt::usage = "absOpt[expr, name] returns the value of the rule obtained from AbsoluteOptions[expr, name]";
@@ -81,7 +84,7 @@ SetAttributes[when, HoldRest];
 when[expr_, form_] := If[MatchQ[expr, form], expr];
 when[expr_, form_, alt_] := If[MatchQ[expr, form], expr, alt];
 
-(* ::Section:: *)
+(* ::Subsection:: *)
 (* Functions *)
 
 filterOpts::usage = "filterOpts[{opt_1 -> v_1, opt_2 -> v_2, ...}, f] returns a sequence opt_i -> v_i where opt_i matches the left-hand side of a rule in Options[f].
@@ -126,6 +129,7 @@ specificArguments[f_, separateAlternatives_ : False] :=
 toAlternatives::usage = "toAlternatives[{p1, p2, ...}] returns p1 | p2 | ...";
 toAlternatives[{a_, b__}] := Alternatives[a, b];
 toAlternatives[{a_}] := a;
+toAlternatives[{}] := Alternatives[];
 
 autoAlt::usage = "autoAlt[expr, alternative] returns alternative if expr === Automatic, and expr otherwise.";
 SetAttributes[autoAlt, HoldRest];
@@ -268,10 +272,10 @@ makeStateIDs[n_, list_ : Automatic, f_ : Automatic] := Which[
   list =!= Automatic, Check[Take[list, n], makeStateIDs[n]],
   True, Range[n]];
 
-(* ::Subsection:: *)
+(* ::Subsubsection:: *)
 (* Formatting *)
 
-(* ::Section:: *)
+(* ::Subsection:: *)
 (* Helper functions *)
 
 spanLength[i_ ;; j_ ;; k_ : 1] := 1 + Floor[(j - i) / k];

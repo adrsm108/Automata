@@ -26,15 +26,19 @@ PackageScope["dfaAscQ"]
 PackageScope["productDFA"]
 PackageScope["scanProductDFA"]
 
-(*
 (* ::Section:: *)
+(* DFAs *)
+
+(* ::Subsection:: *)
 (* Clear Symbols *)
+(*
 ClearAll[ DFAState, DFAQ, DFA, RandomDFA, FactorDFA, ToDFA, MinimizeDFA, dfaAscQ, productDFA, scanProductDFA,
   validDFAInputQ, validDFAInitQ, productStates
 ];
 *)
 
-(* ::Section:: *)
+
+(* ::Subsection:: *)
 (* Exported Functions *)
 
 DFAState::usage = "DFAState[q, <|a_1 -> q_1, ...|>] represents the nonterminal state with ID q in a DFA with transitions \[Delta](q, a_i) = q_i.
@@ -50,10 +54,12 @@ DFAState /: MakeBoxes[s : DFAState[_, _?AssociationQ, ___],
 DFAState /: Keys[DFAState[_, d_, ___]] := Keys[d];
 DFAState /: Values[DFAState[_, d_, ___]] := Values[d];
 
+
 DFAQ::usage = "DFAQ[x] returns True if x is a valid DFA.";
 DFAQ[DFA[_?dfaAscQ]] = True;
 DFAQ[G_Graph] := DFAQ[AnnotationValue[G, "Automaton"]];
 DFAQ[_] = False;
+
 
 DFA::usage = "DFA[states, alphabet, initial, final] represents a DFA";
 DFA::invsym = "The alphabet of `1` does not contain the symbol `2`.";
@@ -143,24 +149,63 @@ DFA /: ToRules[dfa_DFA?DFAQ] :=
 (dfa_DFA?DFAQ)[w_List, n_] := Take[dfa[w, All], n];
 (dfa_DFA?DFAQ)[w_String, args___] := dfa[Characters[w], args];
 
+
 RandomDFA::usage = "RandomDFA[n,k] gives a random DFA with n states on an alphabet of k symbols.";
-Options[RandomDFA] = {
-  "AcceptingStates" -> 0.3,
-  "Alphabet" -> Automatic,
-  "AlphabetFunction" -> Automatic,
-  "States" -> Automatic,
-  "StatesFunction" -> Automatic };
-RandomDFA[n_, k_, OptionsPattern[RandomDFA]] :=
-    With[{
-      nterm = intProp[OptionValue["AcceptingStates"], n],
-      alph = makeAlphabet[k, OptionValue["Alphabet"], OptionValue["AlphabetFunction"]],
-      ids = makeStateIDs[n, OptionValue["States"], OptionValue["StatesFunction"]]},
-      DFA[
-        Thread[ids -> RandomChoice[ids, {n, k}]],
-        alph,
-        RandomSample[ids, 1],
-        RandomSample[ids, UpTo[nterm]]
-      ]];
+OprufferDecode[code_] := Module[
+  {deg = Lookup[Counts[code] + 1, Range[Length@code + 2], 1]},
+  Join[aside[deg[[#]]--&] /@ {First@FirstPosition[deg, 1], #}& /@ code,
+    Flatten[Position[deg, 1, {1}, 2, Heads -> False], {2}]]];ptions[RandomDFA] = {
+  TerminalStates -> 0.3,
+  AlphabetFunction -> Automatic,
+  StatesFunction -> Automatic,
+  AllStatesReachable -> False};
+RandomDFA[statesin : (_Integer | _List), alphin : (_Integer | _List), OptionsPattern[RandomDFA]] :=
+    With[{n = unless[statesin, _List, Length@statesin],
+      k = unless[alphin, _List, List@alphin]},
+      With[{
+        nterm = intProp[OptionValue[TerminalStates], n],
+        ids = unless[statesin, _Integer, makeStateIDs[n, OptionValue[StatesFunction]]],
+        alph = unless[alphin, _Integer, makeAlphabet[k, OptionValue[AlphabetFunction]]]},
+        If[OptionValue[AllStatesReachable],
+          If[k == 1,
+            With[{rs = RandomSample@ids ~ Append ~ RandomChoice[ids]},
+              DFA[BlockMap[(First@# -> Rest@#)&, rs, 2, 1],
+                alph,
+                {First@rs},
+                RandomSample[ids, UpTo[nterm]]
+              ]],
+            With[{asc = GroupBy[prufferDecode@randomPrufferCode[n, k], Last -> First],
+              idxs = AssociationThread[Range[n] -> RandomSample@ids]},
+              DFA[
+                Table[With[{egg = Lookup[asc, i, {}]},
+                  i -> RandomSample@Flatten@Join[egg, RandomChoice[;; n, k - Length@egg]]],
+                  {i, n}] /. idxs,
+                alph,
+                {idxs[n]},
+                RandomSample[ids, UpTo[nterm]]]]],
+          DFA[Thread[ids -> RandomChoice[ids, {Length@ids, Length@alph}]],
+            alph,
+            RandomSample[ids, 1],
+            RandomSample[ids, UpTo[nterm]]]
+        ]]];
+
+
+prufferDecode[code_] := Module[
+  {deg = Lookup[Counts[code] + 1, Range[Length@code + 2], 1]},
+  Append[(deg[[#]]--; #)& /@ {First@FirstPosition[deg, 1], #}& /@ code,
+    Flatten@Position[deg, 1, {1}, 2, Heads -> False]]];
+
+
+randomPrufferCode[n_, k_] := Which[
+  n <= 2, {},
+  k == 1, RandomSample[;; n, n - 2],
+  n - 2 <= k, RandomChoice[;; n, n - 2],
+  True, With[{q = Echo@Quotient[n - 2, k - 1]},
+    RandomSample@Flatten@{
+      Table[RandomSample[;; n, q], k - 2],
+      RandomSample[;; n, q + Mod[n - 2, k - 1]]}
+  ]];
+
 
 FactorDFA::usage = "FactorDFA[n] returns a DFA accepting lists of digits whose decimal value is divisible by n
 FactorDFA[n, True] returns a DFA accepting lists of digits whose decimal value is divisible by n, as well as the empty list.";
@@ -205,6 +250,7 @@ ToDFA[nfa_?NFAQ, alphabet_List : Automatic, OptionsPattern[]] :=
             "alphabet" -> alph
           ]] // If[method === "Minimal", MinimizeDFA, Identity]]];
 
+
 Options[MinimizeDFA] = {Method -> Automatic};
 MinimizeDFA::usage = "MinimizeDFA[dfa] returns an equivalent DFA with the minimum number of states.";
 MinimizeDFA[dfa_?DFAQ, OptionsPattern[]] :=
@@ -227,12 +273,13 @@ MinimizeDFA[dfa_?DFAQ, OptionsPattern[]] :=
             "alphabet" -> Alphabet[smalldfa]
           ]]]];
 
-(* ::Section:: *)
+(* ::Subsection:: *)
 (* Package scope *)
 
 dfaAscQ::usage = "dfaAscQ[asc] returns True if asc is a valid association where asc[\"states\"] is an association, asc[\"initial\"] is a list of length 1, and asc[\"terminal\"] and asc[\"alphabet\"] are both lists.";
 dfaAscQ[KeyValuePattern[{"states" -> _Association, "initial" -> {_}, "terminal" -> _List, "alphabet" -> _List}]] = True;
 dfaAscQ[_] = False;
+
 
 productDFA::usage = "productDFA[A1, A2, ..., init, predicate] returns the product DFA with initial state init and terminal states selected by predicate";
 productDFA[automata__, init_, termpred_] :=
@@ -242,6 +289,7 @@ productDFA[automata__, init_, termpred_] :=
         "initial" -> init,
         "terminal" -> First[terms, {}],
         "alphabet" -> Alphabet /@ Unevaluated[Intersection[automata]]]];
+
 
 scanProductDFA::usage = "scanProductDFA[f, A1, A2] applies f to the id of each reachable state in product DFA of A1 and A2, without explicitly constructing it.";
 scanProductDFA[f_, dfa1_?DFAQ, dfa2_?DFAQ] := With[
@@ -271,7 +319,7 @@ scanProductDFA[f_, nfa1_?NFAQ, nfa2_?NFAQ] := With[
 ];
 scanProductDFA[f_, A1_?AutomatonQ, A2_?AutomatonQ] := scanProductDFA[f, NFA[A1], NFA[A2]];
 
-(* ::Section:: *)
+(* ::Subsection:: *)
 (* Private Functions *)
 
 validDFAInputQ[dfa_, w_] := ContainsOnly[w, Alphabet[dfa]] ||
@@ -280,8 +328,10 @@ validDFAInputQ[dfa_, w_] := ContainsOnly[w, Alphabet[dfa]] ||
         1, Message[DFA::invsym, dfa, First@badsyms],
         _, Message[DFA::invsyms, dfa, badsyms]]; False];
 
+
 validDFAInitQ[{_}] = True;
 validDFAInitQ[x_] := (Message[DFA::badinit, x]; False);
+
 
 productStates[dfas : Repeated[_?DFAQ, {2, Infinity}], terminalPredicate_] :=
     With[{queue = CreateDataStructure["Queue", {Catenate@IDs[{dfas}, "Initial"]}],
