@@ -291,7 +291,7 @@ pSet[HoldPattern[REConcat[
 pSet[x_] := {x};
 
 dSet::usage = "dSet[regex] returns the set of suffix characters of strings recognized by regex.";
-dSet[RENull | EmptyString | Subscript[EmptyString, _], PatternSequence[]] = {};
+dSet[RENull | EmptyString | Subscript[EmptyString, _] | PatternSequence[]] = {};
 dSet[HoldPattern[REUnion[x__]]] := Catenate[dSet /@ {x}];
 dSet[HoldPattern[REClosure[x_]]] := dSet[x];
 dSet[HoldPattern[REConcat[
